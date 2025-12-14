@@ -1,139 +1,183 @@
-int LEDC_CHANNEL_12 = 12;
-int LEDC_NUM_12;
-int LEDC_CHANNEL_13 = 13;
-int LEDC_NUM_13;
-int LEDC_CHANNEL_14 = 14;
-int LEDC_NUM_14;
-int LEDC_CHANNEL_15 = 15;
-int LEDC_NUM_15;
+#include <Arduino.h>
+#include "Chassis.h"
+#include "Romi32U4Buttons.h"
 
-int speed;
 
-void LEDC_12(){
-  if (LEDC_NUM_12 > 255){
-    LEDC_NUM_12 = 255;
-  }
-  if (LEDC_NUM_12 < 0){
-    LEDC_NUM_12 = 0;
-  }
-}
-void LEDC_13(){
-  if (LEDC_NUM_13 > 255){
-    LEDC_NUM_13 = 255;
-  }
-  if (LEDC_NUM_13 < 0){
-    LEDC_NUM_13 = 0;
-  }
-}
-void LEDC_14(){
-  if (LEDC_NUM_14 > 255){
-    LEDC_NUM_14 = 255;
-  }
-  if (LEDC_NUM_14 < 0){
-    LEDC_NUM_14 = 0;
-  }
-}
-void LEDC_15(){
-  if (LEDC_NUM_15 > 255){
-    LEDC_NUM_15 = 255;
-  }
-  if (LEDC_NUM_15 < 0){
-    LEDC_NUM_15 = 0;
-  }
-}
-void motor_Q_Q_Q_Q(int L1, int L2, int R1, int R2){
-  LEDC_NUM_12 = L1;
-  LEDC_12();
-  ledcWrite(12, (LEDC_NUM_12+1));
-  LEDC_NUM_13 = L2;
-  LEDC_13();
-  ledcWrite(13, (LEDC_NUM_13+1));
-  LEDC_NUM_14 = R1;
-  LEDC_14();
-  ledcWrite(14, (LEDC_NUM_14+1));
-  LEDC_NUM_15 = R2;
-  LEDC_15();
-  ledcWrite(15, (LEDC_NUM_15+1));
-}
-void forwards_Q(int number){
-  for(int i = 0; i < number / 25; i++){
-    motor_Q_Q_Q_Q(0, speed, 0, speed);
-    delay((.625) * 1000);
-    motor_Q_Q_Q_Q(0, 0, 0, speed);
-    delay((0.065625) * 1000);
-  }
-  motor_Q_Q_Q_Q(0, 0, 0, 0);
-}
-void forward25(){
-  for(int i2 = 0; i2 < 1; i2++){
-    motor_Q_Q_Q_Q(0, speed, 0, speed);
-    delay((.625) * 1000);
-    motor_Q_Q_Q_Q(0, 0, 0, speed);
-    delay((0.065625) * 1000);
-  }
-  motor_Q_Q_Q_Q(0, 0, 0, 0);
-}
-void backward25(){
-  for(int i3 = 0; i3 < 1; i3++){
-    motor_Q_Q_Q_Q(speed, 0, speed, 0);
-    delay((.625) * 1000);
-    motor_Q_Q_Q_Q(0, speed, 0, 0);
-    delay((0.065625) * 1000);
-  }
-  motor_Q_Q_Q_Q(0, 0, 0, 0);
-}
-void turnleft(){
-  for(int i4 = 0; i4 < 1; i4++){
-    motor_Q_Q_Q_Q(0, 0, 0, speed);
-    // 0.253125
-    // 0.28125
-    delay((0.325) * 1000);
-  }
-  motor_Q_Q_Q_Q(0, 0, 0, 0);
-}
-void forward50(){
-  for(int i5 = 0; i5 < 2; i5++){
-    motor_Q_Q_Q_Q(0, speed, 0, speed);
-    delay((.625) * 1000);
-    motor_Q_Q_Q_Q(0, 0, 0, speed);
-    delay((0.065625) * 1000);
-  }
-  motor_Q_Q_Q_Q(0, 0, 0, 0);
-}
-void backward50(){
-  for(int i6 = 0; i6 < 2; i6++){
-    motor_Q_Q_Q_Q(speed, 0, speed, 0);
-    delay((.625) * 1000);
-    motor_Q_Q_Q_Q(0, speed, 0, 0);
-    delay((0.065625) * 1000);
-  }
-  motor_Q_Q_Q_Q(0, 0, 0, 0);
-}
-void turnright(){
-  for(int i7 = 0; i7 < 1; i7++){
-    motor_Q_Q_Q_Q(0, speed, 0, 0);
-    // 0.253125
-    // 0.28125
-    delay((0.325) * 1000);
-  }
-  motor_Q_Q_Q_Q(0, 0, 0, 0);
+// encoder count targets, tune by turning 16 times and changing numbers untill offset is 0
+#define NIGHTY_LEFT_TURN_COUNT -716
+#define NIGHTY_RIGHT_TURN_COUNT 712
+
+// positive = boost right motor; negative = boost left motor
+
+// F and B go forward/backwards 50 cm by default, but other distances can be easily specified by adding a number after the letter
+// S and E go the start/end distance
+// L and R are left and right
+// targetTime is target time (duh)
+//char moves[200] = "B67 R F L F30 R R F60 B30 R F L F R F L F L F80 B80 L F L F L F30 B30 L F L F L F R F30 B30 R E";
+
+
+char moves[200] = "F30 R F F L F L F F F L F B L F L F F L F L F35 L L F R F R F F L F F R F L F L F";
+double targetTime = 65; //75
+double endDist = 41;
+double startDist = -16;
+
+
+// parameters are wheel diam, encoder counts, wheel track (tune these to your own hardware)
+// default values of 7, 1440, 14 can't go wrong
+// 6.994936972, 1440, 14.0081
+Chassis chassis(7, 1440, 14);
+Romi32U4ButtonA buttonA;
+
+// define the states (I LOVE state machines) (I made the state machine for Jacob's flappy bird in desmos)
+// this state machine is not actually useful in any way
+enum ROBOT_STATE { ROBOT_IDLE,
+                   ROBOT_MOVE,
+                   MOVING };
+ROBOT_STATE robotState = ROBOT_IDLE;
+
+
+// a helper function to stop the motors
+void idle(void) {
+  Serial.println("idle()");
+  chassis.idle();
+  robotState = ROBOT_IDLE;
 }
 
+/*
+ * This is the standard setup function that is called when the board is rebooted
+ * It is used to initialize anything that needs to be done once.
+ */
 void setup() {
-  ledcSetup(LEDC_CHANNEL_12, 5000, 8);
-  ledcAttachPin(12, LEDC_CHANNEL_12);
-  ledcSetup(LEDC_CHANNEL_13, 5000, 8);
-  ledcAttachPin(13, LEDC_CHANNEL_13);
-  ledcSetup(LEDC_CHANNEL_14, 5000, 8);
-  ledcAttachPin(14, LEDC_CHANNEL_14);
-  ledcSetup(LEDC_CHANNEL_15, 5000, 8);
-  ledcAttachPin(15, LEDC_CHANNEL_15);
-  pinMode(18, INPUT);
-  speed = 300;
-  while (!(digitalRead(18) == 0));
-  forward50();
-  turnleft();
+  // This will initialize the Serial at a baud rate of 115200 for prints
+  // Be sure to set your Serial Monitor appropriately
+  Serial.begin(115200);
+  // Serial1 is used to receive data from K210
+
+  // initialize the chassis (which also initializes the motors)
+  chassis.init();
+ // idle();
+
+  // these can be undone for the student to adjust
+  // tuned like shit, very good numbers to change
+  // it's actually a PI controller where first number is P and second is I
+  chassis.setMotorPIDcoeffs(14, 0.6);
 }
 
+void turnLeft() {
+  chassis.turnFor(89, 60);
+  delay(100);
+    chassis.turnFor(89, 60);
+  delay(100);
+
+}
+
+void left() {
+  chassis.turnFor(3, 60);
+    delay(100);
+
+}
+
+void turnRight() {
+  chassis.turnFor(-87, 60);
+  delay(100);
+}
+
+void left(float seconds) {
+  chassis.turnWithTimePosPid(NIGHTY_LEFT_TURN_COUNT, seconds);
+}
+
+void right(float seconds) {
+  chassis.turnWithTimePosPid(NIGHTY_RIGHT_TURN_COUNT, seconds);
+}
+
+// I wrote most of this in a meditative state the night before states lol
 void loop() {
+  if (buttonA.getSingleDebouncedPress()) {
+    delay(300); // wait a little before starting to move so it doesn't hit the pencil or smth idk
+    robotState = ROBOT_MOVE;
+  }
+  
+  if (robotState == ROBOT_MOVE) { 
+    int count = 1; // count the number of moves (turns and straights)
+    for (int i = 0; i < strlen(moves); i++)
+      if (isSpace(moves[i])) count++;
+
+    // constucts *movesList, each element is pointer to the first character of a move string
+    // i.e. if moves is "S R F100 B L E" then *movesList[2] is a pointer to "F" and moveslist[2] is "F100"
+    char *movesList[count];
+    char *ptr = NULL;
+
+    // tokenize moves with space as delimiter, each token is one move
+    byte index = 0;
+    ptr = strtok(moves, " ");
+    while (ptr != NULL) {
+      movesList[index] = ptr;
+      index++;
+      ptr = strtok(NULL, " ");
+    }
+
+    int numTurns = 0;
+    double totalDist = 0;
+    char currentChar;
+    String st;
+
+    // count number of turns and total distance travelled
+    // instead of *movesList[i] I could've just done st[0]... but pointers are cool ig
+    for (int i = 0; i < count; i++) {
+      currentChar = *movesList[i];
+      st = movesList[i];
+      if (currentChar == 'R' || currentChar == 'L') {
+        numTurns++;
+      }
+      else if (currentChar == 'F' || currentChar == 'B') {   
+        if (st.length() > 1) {
+          totalDist += st.substring(1).toDouble();
+        } else {
+          totalDist += 50;
+        }
+      } else if (currentChar == 'S') {
+        totalDist += abs(startDist);
+      } else if (currentChar == 'E') {
+        totalDist += abs(endDist);
+      }
+    }
+
+    double turnTime = 0.55; // target time for a turn is 0.55 seconds
+    double totalTurnTime = 0.65 * numTurns; // but the code doesn't work so the actual time for a turn is 0.65 seconds
+    double totalDriveTime = targetTime - totalTurnTime - 0.0029*totalDist; // this also always went over hence the 0.0029*totalDist
+    double dist;
+
+    // execute the moves (this really should've been a switch case kind of thing)
+    for (int i = 0; i < count; i++) {
+      currentChar = *movesList[i];
+      st = movesList[i];
+
+      if (currentChar == 'R') {
+        right(turnTime);
+      } else if (currentChar == 'L') {
+        left(turnTime);
+      }
+      else if (currentChar == 'F' || currentChar == 'B') {      
+        if (st.length() > 1) {
+          dist = st.substring(1).toDouble();
+        } else {
+          dist = 50;
+        }
+        if (currentChar == 'F') {
+          chassis.driveWithTime(dist, dist/totalDist * totalDriveTime);
+          chassis.turnFor(1, 30);
+        } else {
+          chassis.driveWithTime(0-dist, dist/totalDist * totalDriveTime);
+        } 
+      } else if (currentChar == 'S') {
+        chassis.driveWithTime(startDist, abs(startDist)/totalDist * totalDriveTime);
+      } else if (currentChar == 'E') {
+        chassis.driveWithTime(endDist, abs(endDist)/totalDist * totalDriveTime);
+      }
+    } 
+    //chassis.driveWithTime(100,2);
+    idle(); // go back to idling after finish
+  } 
+  
+  
 }
